@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"runtime"
 	"strings"
+
+	"github.com/smartystreets/go-aws-auth"
 )
 
 // Elasticsearch-specific HTTP request
@@ -120,4 +122,12 @@ func (r *Request) setBodyReader(body io.Reader) error {
 		}
 	}
 	return nil
+}
+
+//setAwsSign sign the http reques using
+//smartystreets/go-aws-auth for aws on ES
+func (r *Request) setAwsSign() {
+	rq := (*http.Request)(r)
+	awsauth.Sign4(rq)
+	r = (*Request)(rq)
 }

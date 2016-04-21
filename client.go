@@ -133,6 +133,7 @@ type Client struct {
 	sendGetBodyAs             string        // override for when sending a GET with a body
 	requiredPlugins           []string      // list of required plugins
 	gzipEnabled               bool          // gzip compression enabled or disabled (default)
+	awsSign                   bool          // indicates whether is connecting to an aws Es instance to sign it
 }
 
 // NewClient creates a new client to work with Elasticsearch.
@@ -555,6 +556,15 @@ func SetSendGetBodyAs(httpMethod string) ClientOptionFunc {
 	}
 }
 
+//awsSignatureSet sets if connecting to an aws instance
+//of Elasticsearch
+func SetAws(awssig bool) ClientOptionFunc {
+	return func(c *Client) error {
+		c.awsSign = awssig
+		return nil
+	}
+}
+
 // String returns a string representation of the client status.
 func (c *Client) String() string {
 	c.connsMu.Lock()
@@ -900,6 +910,7 @@ func (c *Client) healthcheck(timeout time.Duration, force bool) {
 	basicAuth := c.basicAuth
 	basicAuthUsername := c.basicAuthUsername
 	basicAuthPassword := c.basicAuthPassword
+	awsSign := c.awsSign
 	c.mu.RUnlock()
 
 	c.connsMu.RLock()
@@ -915,6 +926,10 @@ func (c *Client) healthcheck(timeout time.Duration, force bool) {
 		if err == nil {
 			if basicAuth {
 				req.SetBasicAuth(basicAuthUsername, basicAuthPassword)
+			}
+			//add amazon signing
+			if awsSign {
+				req.setAwsSign()
 			}
 			res, err := c.c.Do((*http.Request)(req))
 			if err == nil {
@@ -946,6 +961,7 @@ func (c *Client) startupHealthcheck(timeout time.Duration) error {
 	basicAuth := c.basicAuth
 	basicAuthUsername := c.basicAuthUsername
 	basicAuthPassword := c.basicAuthPassword
+	awsSign := c.awsSign
 	c.mu.Unlock()
 
 	// If we don't get a connection after "timeout", we bail.
@@ -957,14 +973,19 @@ func (c *Client) startupHealthcheck(timeout time.Duration) error {
 		*cl = *c.c
 		cl.Timeout = timeout
 		for _, url := range urls {
-			req, err := http.NewRequest("HEAD", url, nil)
+			req, err := NewRequest("HEAD", url)
 			if err != nil {
 				return err
 			}
+			//add amazon signing
+			if awsSign {
+				req.setAwsSign()
+			}
+			//
 			if basicAuth {
 				req.SetBasicAuth(basicAuthUsername, basicAuthPassword)
 			}
-			res, err := cl.Do(req)
+			res, err := cl.Do((*http.Request)(req))
 			if err == nil && res != nil && res.StatusCode >= 200 && res.StatusCode < 300 {
 				return nil
 			}
@@ -1047,6 +1068,7 @@ func (c *Client) PerformRequest(method, path string, params url.Values, body int
 	basicAuthPassword := c.basicAuthPassword
 	sendGetBodyAs := c.sendGetBodyAs
 	gzipEnabled := c.gzipEnabled
+	awsSign := c.awsSign
 	c.mu.RUnlock()
 
 	var err error
@@ -1108,6 +1130,11 @@ func (c *Client) PerformRequest(method, path string, params url.Values, body int
 				c.errorf("elastic: couldn't set body %+v for request: %v", body, err)
 				return nil, err
 			}
+		}
+
+		//add amazon signing
+		if awsSign {
+			req.setAwsSign()
 		}
 
 		// Tracing
